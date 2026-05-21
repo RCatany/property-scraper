@@ -254,9 +254,26 @@ def extract_image_urls(html: str, base_url: str, portal: str) -> list[str]:
         for m in re.findall(r"https?://[^\s\"'\\<>]+?\.(?:jpg|jpeg|png|webp)", html):
             urls.append(m)
 
-    # Dedupe: collapse size variants AND format variants (jpg/webp) of the same
-    # image into a single entry. For Idealista, the unique image identifier is the
-    # numeric ID at the end of the path (e.g. 1439083087). We prefer JPG over WebP.
+    # --- Portal-specific dedup and resolution normalization ---
+
+    if portal == "Fotocasa":
+        # Keep only listing photos from the CDN, upgrade to max resolution,
+        # and deduplicate by image ID.
+        best: dict[str, str] = {}
+        for u in urls:
+            if "/images/anuncio/" not in u:
+                continue  # filter out site logos and assets
+            m = re.search(r"/(\d{7,})\.\w+", u.split("?")[0])
+            if not m:
+                continue
+            img_id = m.group(1)
+            # Normalize to original (max) resolution
+            u_max = re.sub(r"\?rule=.*", "?rule=original", u)
+            if "?rule=" not in u:
+                u_max = u.split("?")[0] + "?rule=original"
+            best.setdefault(img_id, u_max)
+        return list(dict.fromkeys(best.values()))
+
     if portal == "Idealista":
         # Filter to CDN images only and normalize size tokens
         urls = [_normalize_idealista_size(u) for u in urls
@@ -339,6 +356,15 @@ def extract_listing_data(html: str, url: str, portal: str, ref: str) -> dict:
                 data["utag_data"] = json.loads(m.group(1))
             except Exception:
                 pass
+
+    elif portal == "Fotocasa":
+        data["precio_publicado"] = text_or_none(soup.select_one(".re-DetailHeader-price"))
+        data["ubicacion"] = text_or_none(soup.select_one("h1"))
+        feats = [text_or_none(li) for li in soup.select("li.re-DetailHeader-featuresItem")]
+        data["caracteristicas"] = [f for f in feats if f]
+        extras = [text_or_none(li) for li in soup.select("li.re-DetailExtras-listItem")]
+        data["caracteristicas_basicas"] = [e for e in extras if e]
+        data["descripcion"] = text_or_none(soup.select_one(".re-DetailDescription"))
 
     # JSON-LD generico (vale para casi todos los portales)
     for sc in soup.find_all("script", attrs={"type": "application/ld+json"}):
