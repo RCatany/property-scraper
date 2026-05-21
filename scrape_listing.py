@@ -112,6 +112,30 @@ def detect_portal_and_ref(url: str) -> tuple[str, str]:
 # --------------------------------------------------------------------------- #
 # Descarga del HTML: Playwright (preferido) o requests (fallback)
 # --------------------------------------------------------------------------- #
+def _page_has_captcha(page) -> bool:
+    """Detect DataDome / captcha-delivery blocking pages."""
+    try:
+        content = page.content()
+        return ("captcha-delivery.com" in content
+                or "datadome" in content.lower()
+                or "geo.captcha-delivery.com" in content)
+    except Exception:
+        return False
+
+
+def _wait_for_captcha_resolution(page, max_wait: int = 120) -> None:
+    """Poll until captcha disappears or timeout. User solves it in the headed browser."""
+    print("\n*** CAPTCHA DETECTADO ***")
+    print(f"Resuelve el captcha en la ventana del navegador (tienes {max_wait}s)...")
+    start = time.time()
+    while time.time() - start < max_wait:
+        if not _page_has_captcha(page):
+            print("Captcha resuelto — continuando.\n")
+            return
+        time.sleep(2)
+    print("Timeout esperando captcha — continuando con lo que haya.\n", file=sys.stderr)
+
+
 def fetch_with_playwright(url: str, headed: bool, user_data_dir: str | None,
                           wait: float, timeout: int) -> str:
     try:
@@ -136,8 +160,19 @@ def fetch_with_playwright(url: str, headed: bool, user_data_dir: str | None,
             page = ctx.new_page()
 
         page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
-        # dar tiempo a posibles captchas / carga de JS
         time.sleep(wait)
+
+        # Detect and wait for captcha resolution (headed mode)
+        if _page_has_captcha(page):
+            if headed:
+                _wait_for_captcha_resolution(page, max_wait=120)
+            else:
+                print(
+                    "\nCAPTCHA detectado en modo headless. Reintenta con:\n"
+                    "  --headed --user-data-dir ~/.cache/idealista_profile\n",
+                    file=sys.stderr,
+                )
+
         # auto-scroll para forzar lazy-load de fotos
         try:
             for _ in range(12):
