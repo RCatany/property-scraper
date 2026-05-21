@@ -21,22 +21,28 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+A shell alias is configured in `~/.zshrc` so the command works from any directory:
+
+```bash
+alias scrape-listing="python3 ~/GitHub/property-scraper/scrape_listing.py"
+```
+
 ## Usage
 
 ### Basic (Playwright, headless)
 
 ```bash
-python scrape_listing.py \
+scrape-listing \
     --url "https://www.idealista.com/inmueble/110912235/" \
     --municipio Mislata --zona CardenalBenlloch
 ```
 
 ### First run / captcha resolution (headed mode)
 
-Idealista and other portals use DataDome anti-bot. Run headed mode once to solve the captcha, then reuse the browser profile:
+Idealista and other portals use DataDome anti-bot. Run headed mode once to solve the captcha, then reuse the browser profile. The script detects captchas automatically and waits up to 2 minutes for you to solve it in the browser window:
 
 ```bash
-python scrape_listing.py \
+scrape-listing \
     --url "https://www.idealista.com/inmueble/110912235/" \
     --headed --user-data-dir ~/.cache/idealista_profile \
     --municipio Mislata --zona CardenalBenlloch
@@ -45,7 +51,7 @@ python scrape_listing.py \
 ### Explicit output folder
 
 ```bash
-python scrape_listing.py \
+scrape-listing \
     --url "https://www.idealista.com/inmueble/110912235/" \
     --output "/path/to/20260520_Idealista_110912235_Mislata_CardenalBenlloch"
 ```
@@ -53,7 +59,7 @@ python scrape_listing.py \
 ### Fallback with requests (no browser needed, likely blocked)
 
 ```bash
-python scrape_listing.py \
+scrape-listing \
     --url "https://www.idealista.com/inmueble/110912235/" \
     --engine requests
 ```
