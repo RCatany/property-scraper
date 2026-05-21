@@ -89,7 +89,7 @@ scrape-listing \
 |--------|-----------------|---------|
 | Idealista | Full | Price, location, features, full description, max-res photos (JPG/WebP dedup by image ID) |
 | Fotocasa | Full | Price, features, extras, full description, original-resolution photos (logo filtering, dedup by image ID) |
-| Habitaclia | Generic | OG tags + JSON-LD + image heuristics |
+| Habitaclia | Full | Price, location, features, full description, energy cert, XL-res photos (gallery filtering, UUID dedup) |
 | Pisos.com | Generic | OG tags + JSON-LD + image heuristics |
 | Others | Generic | Any portal with standard meta tags |
 

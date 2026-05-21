@@ -95,7 +95,7 @@ def detect_portal_and_ref(url: str) -> tuple[str, str]:
         ref = m.group(1) if m else ""
     elif "habitaclia" in host:
         portal = "Habitaclia"
-        m = re.search(r"(\d{6,})", path)
+        m = re.search(r"-i(\d+)\.htm", path)
         ref = m.group(1) if m else ""
     elif "pisos.com" in host:
         portal = "Pisos"
@@ -256,6 +256,58 @@ def extract_image_urls(html: str, base_url: str, portal: str) -> list[str]:
 
     # --- Portal-specific dedup and resolution normalization ---
 
+    if portal == "Habitaclia":
+        # Images live on images.habimg.com. The gallery contains only this
+        # listing's photos; "similar listings" thumbnails use different refs.
+        # Extract the habimg ref (e.g. "8346-4366125") from gallery images,
+        # then filter to only those, upgrade to XL, and deduplicate by UUID.
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, "html.parser")
+            gallery_imgs = soup.select(".gallery img")
+        except ImportError:
+            gallery_imgs = []
+
+        # Determine the habimg listing ref from the first gallery image
+        habimg_ref = None
+        for img in gallery_imgs:
+            src = img.get("src", "")
+            m = re.search(r"/imgh/(\d+-\d+)/", src)
+            if m:
+                habimg_ref = m.group(1)
+                break
+
+        # Collect all habimg URLs from the full HTML, filter to listing ref
+        raw = re.findall(r'(?:https?:)?//images\.habimg\.com/imgh/[^\s"<>]+\.(?:jpg|jpeg|png|webp)', html)
+        if habimg_ref:
+            raw = [u for u in raw if habimg_ref in u]
+
+        # Normalize: add https: if protocol-relative, upgrade to XL suffix
+        best: dict[str, str] = {}  # uuid -> preferred URL
+        for u in raw:
+            if u.startswith("//"):
+                u = "https:" + u
+            m = re.search(r"([0-9a-f-]{36})(\w*)\.(\w+)$", u)
+            if not m:
+                continue
+            uuid = m.group(1)
+            suffix = m.group(2)
+            ext = m.group(3)
+            if uuid not in best:
+                best[uuid] = u
+            # Prefer XL over G/P
+            cur_suffix = re.search(r"[0-9a-f-]{36}(\w*)\.\w+$", best[uuid])
+            cur_s = cur_suffix.group(1) if cur_suffix else ""
+            size_prio = {"XL": 3, "G": 2, "P": 1}
+            if size_prio.get(suffix, 0) > size_prio.get(cur_s, 0):
+                best[uuid] = u
+        # Ensure all use XL suffix for max resolution
+        out = []
+        for u in dict.fromkeys(best.values()):
+            u_xl = re.sub(r"([0-9a-f-]{36})\w*(\.(?:jpg|jpeg|png|webp))", r"\1XL\2", u)
+            out.append(u_xl)
+        return out
+
     if portal == "Fotocasa":
         # Keep only listing photos from the CDN, upgrade to max resolution,
         # and deduplicate by image ID.
@@ -356,6 +408,20 @@ def extract_listing_data(html: str, url: str, portal: str, ref: str) -> dict:
                 data["utag_data"] = json.loads(m.group(1))
             except Exception:
                 pass
+
+    elif portal == "Habitaclia":
+        data["precio_publicado"] = text_or_none(soup.select_one("[itemprop=price]"))
+        data["ubicacion"] = text_or_none(soup.select_one("h4.address"))
+        # Features from the first feature-container (header), skip price items
+        first_fc = soup.select_one("ul.feature-container")
+        feat_items = first_fc.select("li.feature") if first_fc else []
+        feats = [text_or_none(li) for li in feat_items]
+        data["caracteristicas"] = [f for f in feats if f and "€" not in f]
+        data["descripcion"] = text_or_none(soup.select_one(".detail-description"))
+        # Energy certificate
+        energy = soup.select_one(".energy-container")
+        if energy:
+            data["certificado_energetico"] = text_or_none(energy)
 
     elif portal == "Fotocasa":
         data["precio_publicado"] = text_or_none(soup.select_one(".re-DetailHeader-price"))
