@@ -254,15 +254,29 @@ def extract_image_urls(html: str, base_url: str, portal: str) -> list[str]:
         for m in re.findall(r"https?://[^\s\"'\\<>]+?\.(?:jpg|jpeg|png|webp)", html):
             urls.append(m)
 
-    # dedupe conservando orden + filtrar miniaturas obvias.
-    # En Idealista normalizamos a maxima resolucion para que la misma foto en
-    # distintos tamanos (WEB_DETAIL / -L / -XL-L) colapse en una sola entrada.
+    # Dedupe: collapse size variants AND format variants (jpg/webp) of the same
+    # image into a single entry. For Idealista, the unique image identifier is the
+    # numeric ID at the end of the path (e.g. 1439083087). We prefer JPG over WebP.
+    if portal == "Idealista":
+        # Filter to CDN images only and normalize size tokens
+        urls = [_normalize_idealista_size(u) for u in urls
+                if "img" in urlparse(u).netloc]
+        # Group by image ID (last numeric path segment before extension)
+        best: dict[str, str] = {}  # image_id -> preferred URL
+        for u in urls:
+            m = re.search(r"/(\d{7,})\.\w+", u.split("?")[0])
+            if not m:
+                continue
+            img_id = m.group(1)
+            if img_id not in best:
+                best[img_id] = u
+            elif u.split("?")[0].lower().endswith(".jpg") and best[img_id].split("?")[0].lower().endswith(".webp"):
+                best[img_id] = u  # prefer jpg
+        return list(dict.fromkeys(best.values()))  # preserve insertion order
+
+    # Generic portal: dedupe by full URL path (no format collapsing)
     seen, out = set(), []
     for u in urls:
-        if portal == "Idealista":
-            if "img" not in urlparse(u).netloc:
-                continue
-            u = _normalize_idealista_size(u)
         key = u.split("?")[0]
         if key in seen:
             continue
@@ -307,7 +321,14 @@ def extract_listing_data(html: str, url: str, portal: str, ref: str) -> dict:
         data["ubicacion"] = text_or_none(soup.select_one(".main-info__title-minor"))
         feats = [text_or_none(li) for li in soup.select(".info-features span, .details-property-feature-one li")]
         data["caracteristicas"] = [f for f in feats if f]
-        data["descripcion"] = text_or_none(soup.select_one(".comment, .adCommentsLanguage, [class*='comment']"))
+        # .comment is the actual description div; avoid [class*='comment'] which
+        # matches the "Añadir tu nota" UI widget that appears earlier in the DOM.
+        desc_node = (
+            soup.select_one(".commentsContainer .comment")
+            or soup.select_one("div.comment")
+            or soup.select_one(".adCommentsLanguage p")
+        )
+        data["descripcion"] = text_or_none(desc_node)
         # bloque "Caracteristicas basicas"
         basic = [text_or_none(li) for li in soup.select(".details-property_features li")]
         data["caracteristicas_basicas"] = [b for b in basic if b]
