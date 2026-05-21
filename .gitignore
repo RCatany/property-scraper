@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Browser profiles (may contain cookies/sessions)
+.cache/
+*_profile/
+
+# Downloaded listing data (keep in Google Drive, not in repo)
+photos/
+fuentes/
+md_files/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
