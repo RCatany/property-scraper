@@ -85,13 +85,13 @@ scrape-listing \
 
 ## Supported portals
 
-| Portal | Extraction level |
-|--------|-----------------|
-| Idealista | Full (price, features, description, max-res photos) |
-| Fotocasa | Generic (OG tags + JSON-LD + image heuristics) |
-| Habitaclia | Generic |
-| Pisos.com | Generic |
-| Others | Generic (any portal with standard meta tags) |
+| Portal | Extraction level | Details |
+|--------|-----------------|---------|
+| Idealista | Full | Price, location, features, full description, max-res photos (JPG/WebP dedup by image ID) |
+| Fotocasa | Full | Price, features, extras, full description, original-resolution photos (logo filtering, dedup by image ID) |
+| Habitaclia | Generic | OG tags + JSON-LD + image heuristics |
+| Pisos.com | Generic | OG tags + JSON-LD + image heuristics |
+| Others | Generic | Any portal with standard meta tags |
 
 ## License
 
