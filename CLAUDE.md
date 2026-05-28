@@ -44,11 +44,13 @@ Naming conventions: see `Inmuebles/_CONVENCIONES_CARPETAS.md` in the Mortgage pr
 
 ```bash
 # Shell alias (defined in ~/.zshrc):
-scrape-listing --url <URL> --municipio <M> --zona <Z> --headed --user-data-dir ~/.cache/<portal>_profile
+scrape-listing --url <URL> --headed --user-data-dir ~/.cache/<portal>_profile
 
 # Or directly:
-python3 scrape_listing.py --url <URL> --municipio <M> --zona <Z>
+python3 scrape_listing.py --url <URL>
 ```
+
+Municipio and zona are derived automatically by `derive_location` from the URL + scraped data; pass `--output <path>` to override the destination entirely.
 
 ## Dependencies
 

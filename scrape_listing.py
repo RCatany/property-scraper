@@ -50,6 +50,7 @@ import logging
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 
@@ -448,6 +449,76 @@ def extract_listing_data(html: str, url: str, portal: str, ref: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Derivacion de municipio / zona para el nombre de carpeta
+# --------------------------------------------------------------------------- #
+def _camel_case_slug(s: str | None) -> str:
+    """'La Constitución - Canaleta' -> 'LaConstitucionCanaleta'. Vacío -> 'Unknown'."""
+    if not s:
+        return "Unknown"
+    norm = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    tokens = [t for t in re.split(r"[^A-Za-z0-9]+", norm) if t]
+    if not tokens:
+        return "Unknown"
+    return "".join(t[:1].upper() + t[1:].lower() for t in tokens)
+
+
+def derive_location(portal: str, url: str, data: dict) -> tuple[str, str]:
+    """Devuelve (municipio, zona) en CamelCase, derivados de URL + datos extraidos.
+
+    Cada slot vale 'Unknown' si su fuente no aporta valor.
+    """
+    municipio_raw: str | None = None
+    zona_raw: str | None = None
+    ubic = (data.get("ubicacion") or "").strip() or None
+
+    if portal == "Idealista":
+        # `ubicacion` viene como 'Zona, Municipio' (ej. "La Constitución - Canaleta, Mislata")
+        # o un único token (ej. "Mislata") cuando la zona no consta.
+        if ubic:
+            if "," in ubic:
+                head, _, tail = ubic.rpartition(",")
+                municipio_raw = tail.strip() or None
+                zona_raw = head.strip() or None
+            else:
+                municipio_raw = ubic
+        # Si seguimos sin zona, intenta sacarla del titulo: "Piso en venta en <Zona>".
+        if not zona_raw:
+            titulo = (data.get("titulo") or "").strip()
+            parts = re.split(r"\s+en\s+", titulo, flags=re.IGNORECASE) if titulo else []
+            if len(parts) > 1:
+                candidate = parts[-1].split(",", 1)[0].strip()
+                # Evita duplicar municipio si el titulo lo repite.
+                if candidate and candidate.lower() != (municipio_raw or "").lower():
+                    zona_raw = candidate
+
+    elif portal == "Fotocasa":
+        # Municipio: token tras "vivienda" en el path
+        path_parts = [p for p in urlparse(url).path.split("/") if p]
+        if "vivienda" in path_parts:
+            idx = path_parts.index("vivienda")
+            if idx + 1 < len(path_parts):
+                municipio_raw = path_parts[idx + 1]
+        # Zona: ultima palabra significativa de la calle (tras el ultimo " en ")
+        if ubic:
+            first_chunk = ubic.split(",", 1)[0].strip()
+            parts_en = re.split(r"\s+en\s+", first_chunk, flags=re.IGNORECASE)
+            street = parts_en[-1] if parts_en else first_chunk
+            words = [w for w in re.split(r"\s+", street) if len(w) > 2 and not w.isdigit()]
+            if words:
+                zona_raw = words[-1]
+
+    elif portal == "Habitaclia":
+        # URL pattern: comprar-piso-<zona_slug>-<municipio>-i<ref>.htm
+        m = re.search(r"-([^-/]+)-i\d+\.htm", urlparse(url).path)
+        if m:
+            municipio_raw = m.group(1)
+        if ubic:
+            zona_raw = ubic
+
+    return _camel_case_slug(municipio_raw), _camel_case_slug(zona_raw)
+
+
+# --------------------------------------------------------------------------- #
 # Descarga de fotos
 # --------------------------------------------------------------------------- #
 def download_photos(urls: list[str], photos_dir: Path, delay: float, max_photos: int) -> int:
@@ -513,9 +584,8 @@ def main() -> int:
     ap.add_argument("--url", required=True, help="URL del anuncio.")
     ap.add_argument("--output", help="Carpeta del inmueble (se crea si no existe).")
     ap.add_argument("--base", default=str(DEFAULT_BASE),
-                    help="Si no das --output, carpeta base donde crear la del inmueble.")
-    ap.add_argument("--municipio", default="Municipio", help="Para el nombre de carpeta auto.")
-    ap.add_argument("--zona", default="Zona", help="Para el nombre de carpeta auto (CamelCase).")
+                    help="Si no das --output, carpeta base donde crear la del inmueble. "
+                         "El municipio y la zona se derivan automaticamente de la URL y del HTML.")
     ap.add_argument("--engine", choices=["playwright", "requests"], default="playwright")
     ap.add_argument("--headed", action="store_true", help="Playwright en modo visible (para resolver captcha).")
     ap.add_argument("--user-data-dir", help="Perfil persistente de Chromium (guarda cookies anti-captcha).")
@@ -534,19 +604,9 @@ def main() -> int:
 
     portal, ref = detect_portal_and_ref(args.url)
     fecha = args.fecha or _dt.date.today().strftime("%Y%m%d")
+    print(f"Portal={portal}  Ref={ref}")
 
-    if args.output:
-        out = Path(args.output)
-    else:
-        folder = f"{fecha}_{portal}_{ref}_{args.municipio}_{args.zona}"
-        out = Path(args.base) / folder
-    (out / "fuentes").mkdir(parents=True, exist_ok=True)
-    (out / "md_files").mkdir(parents=True, exist_ok=True)
-    (out / "photos").mkdir(parents=True, exist_ok=True)
-
-    print(f"Portal={portal}  Ref={ref}  ->  {out}")
-
-    # 1) HTML
+    # 1) HTML (lo necesitamos antes de decidir la carpeta para poder derivar municipio/zona)
     try:
         if args.engine == "playwright":
             html = fetch_with_playwright(args.url, args.headed, args.user_data_dir, args.wait, args.timeout)
@@ -556,23 +616,36 @@ def main() -> int:
         print(f"\nERROR al descargar la pagina: {e}", file=sys.stderr)
         return 2
 
+    # 2) Datos (necesarios para derivar municipio/zona)
+    data = extract_listing_data(html, args.url, portal, ref)
+    data["fecha_captura"] = fecha
+
+    # 3) Carpeta destino — con municipio/zona auto-derivados de URL + datos
+    if args.output:
+        out = Path(args.output)
+    else:
+        municipio, zona = derive_location(portal, args.url, data)
+        folder = f"{fecha}_{portal}_{ref}_{municipio}_{zona}"
+        out = Path(args.base) / folder
+    (out / "fuentes").mkdir(parents=True, exist_ok=True)
+    (out / "md_files").mkdir(parents=True, exist_ok=True)
+    (out / "photos").mkdir(parents=True, exist_ok=True)
+    print(f"Carpeta destino: {out}")
+
     html_path = out / "fuentes" / f"{fecha}_Anuncio_{ref}.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"HTML guardado: {html_path}")
 
-    # 2) Datos
-    data = extract_listing_data(html, args.url, portal, ref)
-    data["fecha_captura"] = fecha
     json_path = out / "fuentes" / f"{fecha}_Anuncio_{ref}.json"
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Datos guardados: {json_path}")
 
-    # 3) Fotos
+    # 4) Fotos
     imgs = extract_image_urls(html, args.url, portal)
     print(f"Imagenes detectadas: {len(imgs)}")
     n_photos = download_photos(imgs, out / "photos", args.delay, args.max_photos) if imgs else 0
 
-    # 4) Markdown legible
+    # 5) Markdown legible
     md_path = out / "md_files" / f"{fecha}_Anuncio_{portal}_{ref}.md"
     md_path.write_text(build_markdown(data, n_photos, fecha), encoding="utf-8")
     print(f"Markdown guardado: {md_path}")
