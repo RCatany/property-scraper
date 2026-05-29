@@ -231,8 +231,22 @@ def process_row(ws, row_idx: int, fetchers: dict, headed: bool, dry_run: bool, v
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Monitor de estado de los anuncios del shortlist.")
-    ap.add_argument("--xlsx", default=str(DEFAULT_XLSX), help="Ruta al Inmuebles_SHORTLIST.xlsx")
+    ap = argparse.ArgumentParser(
+        description="Monitor de estado de los anuncios del shortlist.",
+        epilog=(
+            "Ejemplos:\n"
+            "  check-listing-status                              # usa el .xlsx por defecto en Google Drive\n"
+            "  check-listing-status SHORTLIST.xlsx               # relativo al directorio actual\n"
+            "  check-listing-status /full/path/SHORTLIST.xlsx    # ruta absoluta\n"
+            "  check-listing-status SHORTLIST.xlsx --dry-run --only-ids P001,P005"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("xlsx_pos", nargs="?", metavar="XLSX",
+                    help="Ruta al .xlsx (relativa al directorio actual o absoluta). "
+                         "Si se omite, se usa el shortlist por defecto.")
+    ap.add_argument("--xlsx", dest="xlsx_flag", default=None,
+                    help="Forma alternativa (con flag) de pasar la ruta al .xlsx.")
     ap.add_argument("--only-ids", help="Lista CSV de IDs a procesar (ej. P001,P005). Por defecto todas.")
     ap.add_argument("--include-discarded", action="store_true",
                     help="Procesar tambien filas con 'Estado proceso' que empiezan por DESCARTADO.")
@@ -246,7 +260,9 @@ def main() -> int:
 
     from openpyxl import load_workbook  # local import
 
-    xlsx_path = Path(args.xlsx)
+    # Prioridad: positional > --xlsx > DEFAULT_XLSX
+    raw = args.xlsx_pos or args.xlsx_flag or str(DEFAULT_XLSX)
+    xlsx_path = Path(raw).expanduser().resolve()
     if not xlsx_path.exists():
         print(f"ERROR: no existe {xlsx_path}", file=sys.stderr)
         return 2

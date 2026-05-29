@@ -146,25 +146,41 @@ Rows whose `Estado proceso` starts with `DESCARTADO` are skipped by default.
 
 ### Usage
 
-```bash
-# Dry run on every row (no Excel writes)
-/opt/anaconda3/bin/python check_listing_status.py --dry-run -v
+A shell alias is configured in `~/.zshrc` so the command works from any directory:
 
-# Real run on the default Excel
-/opt/anaconda3/bin/python check_listing_status.py
+```bash
+alias check-listing-status="python3 ~/GitHub/property-scraper/check_listing_status.py"
+```
+
+The Excel path can be passed as a positional argument (relative to the current directory or absolute). With no argument, the default shortlist in Google Drive is used.
+
+```bash
+# Default shortlist (from anywhere)
+check-listing-status
+
+# From inside the Inmuebles folder, just the filename
+cd ~/Library/CloudStorage/.../Inmuebles
+check-listing-status Inmuebles_SHORTLIST.xlsx
+
+# Absolute path
+check-listing-status /path/to/some_other_shortlist.xlsx
+
+# Dry run on every row (no Excel writes)
+check-listing-status --dry-run -v
 
 # Only a subset
-/opt/anaconda3/bin/python check_listing_status.py --only-ids P001,P005
+check-listing-status --only-ids P001,P005
 
 # Include discarded listings
-/opt/anaconda3/bin/python check_listing_status.py --include-discarded
+check-listing-status --include-discarded
 ```
 
 CLI options:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--xlsx` | shortlist in Google Drive | Path to the workbook |
+| `XLSX` (positional) | shortlist in Google Drive | Path to the workbook (relative or absolute) |
+| `--xlsx` | — | Alternative flag form (same effect as the positional) |
 | `--only-ids` | all rows | Comma-separated subset, e.g. `P001,P005` |
 | `--include-discarded` | off | Process rows with `Estado proceso` starting with `DESCARTADO` |
 | `--dry-run` | off | Print actions, do not save |
